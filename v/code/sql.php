@@ -104,7 +104,7 @@ class selector extends view{
         //
         //Formulate the concat_ws expression. The first argument is the separator
         //followed by parts to join
-        $exp = new function_('concat_ws', [$sep, ...$this->get_friendly_part($join)]);
+        $exp = new function_('concat_ws', [$sep, ...$this->get_friendly_part_of_join($join)]);
         //
         //Define the column of type field
         $field = new field($this, $fname, $exp);
@@ -116,7 +116,7 @@ class selector extends view{
     //Yield all the parts of a friendly column, given the join that is used for
     //formulating this query. Each part is derived from an identifier attributes
     //that make up the entities partcipating in the join.
-    function get_friendly_part(join $join):\Generator/*<column>*/{
+    function get_friendly_part_of_join(join $join):\Generator/*<column>*/{
         //
         //A join has joints, which is an order indexed list, i.e., map of joints
         //The values are the joints collection
@@ -219,7 +219,7 @@ class editor extends selector{
             //All the cases below must refer to a foreign key column Ensure that
             //this is indeed the case
             if (!$col instanceof foreign) 
-                throw new Exception("Column $col was expected to be a foreign key");
+                throw new \Exception("Column $col was expected to be a foreign key");
             //
             //All foreign keys need a selector (based on the away entity) to 
             //support friendly columns and their corresponding joints
@@ -587,23 +587,19 @@ class fit extends network{
 
     //In a target fitting network, it is an error if a path was not found to a 
     //required target
-    function verify_integrity(bool $throw_exception=true){
+    function verify_integrity():void{
         //
         //Loop throu every target and report those that are not set
         foreach($this->targets as $target){
             //
             //The partial name of an entity should include the database (to take
-            //care of multi-dataase situations)
-            if (!isset($this->path[$target->partial_name])){
+            //care of multi-database situations)
+            if (!isset($this->path[$target->name])){
                 //
-                //Formulate teh error message
-                $msg = "No path was found for target $target->partial_name";
+                //Formulate the error message
+                $msg = "No path was found for target {$target->name}";
                 //
-                if (!$throw_exception){
-                    throw new \Exception($msg);
-                }else{
-                    $this->errors[]=$msg;
-                }
+                $this->errors[]=$msg;
             }
         }
     }
@@ -732,6 +728,17 @@ class save extends network{
 //You must exceute a join in order for the joints to be constructed.
 class join extends mutall{
     //
+    //Targets. What are these? They are used in the following context
+    /*
+        //Yielding the trivial entity in this view includes all the target entites 
+        //involved in this join
+        function yield_entity(): \Generator {
+            //
+            foreach ($this->join->targets->keys() as $entity) yield $entity;
+        }
+    */
+    public \stdClass $targets;
+    //
     //The ordered list of join targets indexed by the partial entity, pename. 
     //This list is constructed when a join is executed.
     public \Ds\Map /*<pename, joint>*/$joints;
@@ -782,7 +789,7 @@ class join extends mutall{
         //
         //Get the partial name of the entity  which is required as 
         //the base of a new or existing joint.
-        $pename = $entity->partial_name;
+        $pename = $entity->name;
         //
         //Add the JOINT descendant, if it does not exist
         if (!$this->joints->hasKey($pename)){
@@ -827,7 +834,7 @@ class join extends mutall{
         $ok=uasort($joints, fn($a, $b)=>$a->position<=>$b->position);
         //
         //Check whether the sorting was successful or not 
-        if(!$ok)throw new Exception("Sorting of joints failed failed");  
+        if(!$ok)throw new \Exception("Sorting of joints failed failed");  
         //
         //Map each field to its sql string version 
         $joins_str=array_map(fn($target)=>$target->stmt(), $joints);

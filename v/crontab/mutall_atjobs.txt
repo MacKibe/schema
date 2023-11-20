@@ -1,0 +1,1 @@
+/home/mutall/projects/schema/v/code/scheduler_messenger.php Hello This is a mutall at scheduler test individual 1269 | at 2022-11-18 >> /home/mutall/projects/schema/v/error/log.txt

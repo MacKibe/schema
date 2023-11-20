@@ -1,5 +1,8 @@
 <?php
+//All out php code is placed in the mutall namespace. Therefore native PHP 
+//functions and constants must be prefixed with a \
 namespace mutall;
+
 //
 require_once 'config.php';
 //
@@ -17,7 +20,6 @@ require_once 'config.php';
 //The super class that supports the common methods for all the classes 
 //in a mutall project. 
 class mutall {
-
     //
     //Every mutall object is characterised by this property
     public string $class_name;
@@ -26,17 +28,28 @@ class mutall {
     public string $ns;
     //
     public bool $throw_exception;
-
+    //
+    //To support uploading of files
+    //
+    //The upload input arguments, eg., destination,action, etc
+    public \stdClass $inputs;
+    //
+    //The files to be uploaded
+    public array $files;
+    //
+    //An array of myerrors to support error reporting for all mutall 
+    //based objects
+    public array /*<myerror>*/ $errors = [];
     //
     function __construct(bool $throw_exception = true) {
         //
         //What do you do if there are any (entity) errors?. That depends on the
-        //3rd parameter -- throw_exception. The Default is true
+        //given parameter -- throw_exception. The Default is true
         $this->throw_exception = $throw_exception;
         //
+        //Set the class_name of this method
         //
         $reflect = new \ReflectionClass($this);
-        //
         $this->class_name = $reflect->getShortName();
         //
         //Add the namespace from which this objet was created
@@ -49,7 +62,7 @@ class mutall {
         //
         //The class name must be set 
         if (!isset($_REQUEST['class'])) 
-            throw new \Exception('Class name not found');
+            throw new \Exception('Class name not found in $_REQUEST');
         
         // 
         //Get the requested class name. PHP classes referenced in Javascript are
@@ -99,38 +112,110 @@ class mutall {
     }
 
     
-     /**
-      * Illustrate how the image file is moved to the server.
-      * @return bool
-      */
-    static function post_file(): bool {
+     //Upload files to the server
+     function upload_files(): void{
         //
-        //Get the files to upload...
-        $fs_name = $_FILES['file']['name'][0];
-        $fs_tmp_name = $_FILES['file']['tmp_name'][0];
+        //Retrieve the imagery
+        $this->inputs= json_decode($_POST['inputs']);
+    
+        //It is an error if there are no files to upload
+        if (!isset($_FILES['files'])) throw new \Exception('There are no files to upload');
         //
-        //Get the post Folder to save to
-        $folder = $_POST['folder'];
+        $this->files = $_FILES['files'];
+        //   
+        // Loop through each uploaded file and save it to the destination folder.
+        for ($i = 0; $i < count($this->files["name"]); $i++) $this->upload_file($i);
         //
-        //Concatenate the folder and file name to get the actual path to save to.
-        $path = $folder . '/' . $fs_name;
-        //
-        //
-        //The move_uploaded_file() moves an uploaded file to a new location.
-        //if the destination file already exists it will be overwritten.
-        //requires a file_path: the file to be moed.
-        //moved_path: where the file will be moved.
-        return move_uploaded_file($fs_tmp_name, $path);
+        //Depending on throw exception setting report errors
+        if ($this->throw_exception && count($this->errors)>0) 
+            throw new \Exception("{$this->errors}");
+             
     }
     
-    //Report exceptions in a more friendly fashion
-    static function get_error(\Exception $ex): string {
+    //Load the i'th image. This means moving the i'th file to a desired location
+    //and saving the metadata to a database
+    function upload_file(int $i){
+        //
+        //Get the name of the i'th file
+        $name = $this->files["name"][$i];
+        //
+        //Check if the file was transferred correctly or not
+        if($this->files["error"][$i] !== 0) 
+            return $this->errors[]="File $name was not transferred correctly";
+        //
+        //Get the destination folder
+        $folder = $this->inputs->destination;
+        //
+        //Formulate the url of dthe file (without the local_host prefix)    
+         $url= $folder."/".$name;
+        //
+        //Where to move the file
+        $filename = $_SERVER['DOCUMENT_ROOT']."/".$url;
+        //
+        //Take action depending on whether the file exists or not
+        if (file_exists($filename)) $this->take_action($filename, $name, $i);
+        //
+        //Move the file from temporary storage to the destination unconditionnaly
+        else $this->move_file($filename, $name, $i);    
+    }
+    
+    //
+    //Move the file from temporary storage to the destination
+    function move_file(string $filename, string $name, int $i){
+        //
+        //Get the temp filename from where to move the file
+        $source = $this->files["tmp_name"][$i];
+        //
+        //Do the move
+        $result /*:boolean*/= move_uploaded_file($source, $filename);
+        //
+        //Check if the moving was successful or not; if not report error
+        if(!$result) $this->errors[]=new myerror("File $name not moved to its destinatio for some reason");
+    }
+    
+    //When a file exists, take the appropriate action
+    //skipping, overiting or repoting it as an error
+    function take_action(string $filename, string $name, int $i){
+        //
+        switch ($this->inputs->action){
+            //
+            //Skip the file
+            case "skip":return;
+            //
+            //Do not overwrite the file; instead log his as an error
+            case "report": return $this->errors[]="File '$filename' already exist";
+            //
+            //Overwrite the file    
+            case "overwrite":$this->move_file($filename, $name, $i);    
+        }
+    }
+    
+    //Style the given error so that it comes out organized in a detail/summary
+    //arrangement. E.g.,
+    /*
+        <details>
+            <summary>
+                $msg->getMessage()
+            </summary>
+                $msg->getTraceMessage();
+        </details>
+    */
+    static function style_error(myerror $ex):string{
         //
         //Replace the hash with a line break in the trace message
         $trace = str_replace("#", "<br/>", $ex->getTraceAsString());
         //
-        //Retirn the full message
-        return $ex->getMessage() . "<br/>$trace";
+        //Compile the result following the above fragment
+        $result ="
+            <details>
+                <summary>
+                    {$ex->getMessage()}
+                </summary>
+                    $trace
+            </details>";
+        //
+        //Return the exception as a string result
+        return $result;
     }
 
     //
@@ -151,21 +236,31 @@ class mutall {
         }
     }
 
-    //The following tow functios are used for intercepting posted data for debugging
-    //purposes.
+    //The following 2 functions are used for intercepting posted data (for 
+    //debugging purposes) by interactin with the suoer global varaibles.
     //
-    //1. Save Requested/posted data to the given file
-    static function save_requests(string $filename) {
-        $json = json_encode($_REQUEST);
+    //Save Requested/posted data to the given file
+    static function save_globals(string $filename) {
+        //
+        //Save the entire global environment
+        $json = json_encode($GLOBALS);
         file_put_contents($filename, $json);
     }
 
-    //Retrieve posted data to a file
-    static function set_requests(string $filename) {
+    //Retrieve the posted data and assign it to the global variable
+    static function set_globals(string $filename){
+        //
+        //Read the contemts
         $contents = file_get_contents($filename);
         //
-        //Set teh requests, using keys as array indices
-        $_REQUEST = json_decode($contents, true);
+        //Set the requests, using keys as array indices
+        $globals = json_decode($contents, true);
+        //
+        // To restore the previous behavior, iterate its copy and assign 
+        // each property back to $GLOBALS.
+        foreach ($globals as $key => $value) {
+            $GLOBALS[$key] = $value;
+        }
     }
     
     
@@ -255,46 +350,130 @@ class mutall {
 
 }
 
-
 //Modelling special mutall objects that are associated with a database schema.
 //Database, entity, index and column extends this class. Its main charatreistic
 //is that it represents a package whose contents can "saved", resulting in 
 //a basic expression.
-class schema extends mutall {
+abstract class schema extends mutall {
     //
-    //This partial name of a schema objected is its name plus the database 
-    //source it needed for formulating xml tags, indexing joints, etc.
-    public string $partial_name;
+    //The name of a schema object, used in formulating xml tags, indexing joints, etc.
+    public string $name;
+    //
+    //Title is a comment (typically associated with a field) that explains 
+    //expounds on the name
+    public string $title;
     //
     //Toggle the default auto commit of the trasactions to true of false onorder to 
     //influence a rollback and a commit upon the end of a transaction 
     //The default is a false 
     static bool $roll_back_on_fatal_error = false;
     //
-    //A achema object has dual forms. The first one is said to be static; the 
-    //second one is activated. When a schema object is activated, the resulting 
-    //errors are manaed by ths property
-    public array /* error[] */$errors = [];
+    //This method (to be implemented by all descendants) collects design issues
+    //and saves them in the above error array. It is designed to support:-
+    //(1) reporting of integrity when the underlying dayabase is created
+    //(2) metavisuo applications
+    //By default, this methods does nothing; teh user pverrides it when needed.
+    function verify_integrity():void {}
     //
     //When a shema object is written to a database, the result can be accessed
     //from here
     public /*answer*/ $answer;
 
-    //The partial name is used for identifying this object in the
-    //context of generating xml logs
-    function __construct(string $partial_name='no_name') {
+    //A schema has a name
+    function __construct(string $name) {
         //
-        $this->partial_name = $partial_name;
+        $this->name = $name;
         //
         parent::__construct();
     }
     
-    //Compile the full name of a node from the partial ame. This is implemented
-    //as a function because the partial name may change during runtime, e.g., in 
-    //the case of barrel saving
+    //Compile the full name of a node from its name and that of its class
+    //This is implemented as a function because the partial name may change 
+    //during runtime, e.g., in the case of barrel saving
     function full_name():string{
-        return "$this->class_name.$this->partial_name";
+        //
+        //Get the class name, complete with the namespaces
+        $name = get_class($this);
+        //
+        //Split the name into parts, using teh namespace separator \\
+        $array = explode("\\", $name);
+        //
+        //Reverse the components, so that the last one comes last
+        $parts = array_reverse($array);
+        //
+        //Pick the first one, combine it with name, then retirn it
+        return $parts[0].$this->name;
     }
+    
+    
+    //Returns the children of this schema class.  By default, a schema has no
+    //children. When it does, overide this fact
+    function children():array {return []; }
+    
+    
+    //Compile report for this schema object comprising of an error message and 
+    //the total number of errors, i.e., both local and those of the children.
+    function compile_report():array/*[string, int]*/{
+        //
+        //Only children that have errors are considered
+        $children = array_filter($this->children(), fn($child)=>count($child->errors)>0);
+        //
+        //Compile reports for the erroneous children of this schema object
+        $child_reports = array_map(
+            //
+            //Map a child to its report    
+            fn($child)=>$child->compile_report(), 
+            //
+            $children
+        );
+        //
+        //Get total number of errors for this schema object by adding the number
+        //of local errors to the sum of those errors reported by the children
+        $total_errors = array_reduce(
+            //
+            //These are the child reports    
+            $child_reports, 
+            //
+            //Accumulate errors from the children reports. N.B. index 1 is the
+            //field index that matches the error count in the report    
+            fn($accumulator, $report)=>$accumulator += $report[1],
+            //
+            //Start the totalling with a count of the local errors    
+            count($this->errors)
+        );
+        //
+        //Get the local report comprising of a header and the error
+        //messages organized in a detail/summaty arrangement;
+        $local_report = array_reduce(
+            //
+            //Use the local errors to drive this report    
+            $this->errors,
+            //
+            //Style up an error to show the summary and hide details    
+            fn($accum, $error)=>$accum.=mutall::style_error($error),
+           //
+           //Start a local report with a header
+           "<h2>There are $total_errors errors in ".get_class($this)." ".$this->name."</h2>"
+        );
+        //
+        //Compile the complete report, comprising of the local section and
+        //that of the children
+        $complete_report = array_reduce(
+            //
+            //Here are the children reports    
+            $child_reports,        
+            //
+            //Accumulate the children reports. N.B., a separator is assumed
+            fn($accum, $report)=>$accum.=$report[0],
+            //
+            //Start with the local report section followed by that of the 
+            //children, if necesary
+            $local_report.(count($child_reports)===0 ? "": "<br/>Child reports<br/>")
+        );
+        //
+        return [$complete_report, $total_errors]; 
+    }
+    
 
     //
     //Exports a schema object to the database by:-
@@ -392,7 +571,7 @@ class schema extends mutall {
         //(\stdClass) object, so it may fail. 
         $comment = json_decode($json);
         //
-       //If the comment is not a valid json text, then consider teh original text
+       //If the comment is not a valid json text, then consider the original text
        //as a title for this schema object
        if (is_null($comment)){
            //
@@ -506,7 +685,7 @@ interface expression {
     //Yields the primary attributes that are used in fomulating this expression.
     //This is important for determining if a view column is directly editable or 
     //not. It  also makes it possble to expression values by accesing the primary
-    //eniies that constitue them up.
+    //entities that constitue them up.
     function yield_attribute(): \Generator;
 }
 
@@ -584,13 +763,14 @@ class function_ implements expression, answer{
 //other databases)
 class database extends schema {
     //
-    //An array of entties the are the collection of the tables that are required to create a 
+    //An array of entities the are the collection of the tables that are required to create a 
     //database 
     public array $entities = [];
     //
     //This is the pdo property that allows us to query and retrieve information from 
     //the database it is a property to avoid this class from extending a pdo
     public \PDO $pdo;
+    //
     //Let the user set what should be considered as the default database. This is 
     //the database that is picked if a daabase name is not given explicity. This 
     //is designed to simplify working with a single database.
@@ -600,8 +780,10 @@ class database extends schema {
     static array/* database[name] */ $current = [];
     //
     //This is where the error report is saved.
-    public string $report;
-
+    public string $error_report;
+    //
+    //Do we need to generate a complete database or not;
+    public bool $complete;
     //
     //The database constructor requires the following parameters 
     //name: name of the database which is mandatory 
@@ -610,19 +792,21 @@ class database extends schema {
     //an empty shell is returned; this may be useful when quering the database
     //directly, i.e., without the need of the object model
     function __construct(
-            //
-            //The database name.
-            string $name,
-            //
-            //An optional boolean that indicates whether we desire a database
-            //complete with its entities or not. The the default is complete.
-            // If not  complete an empty shell is returned; this may be useful when 
-            //quering the database directly, i.e., without the need of the object model
-            bool $complete = true,
-            //
-            //An option that throws errors as soon as they are found; the  
-            //default is true
-            bool $throw_exception = true
+        //
+        //The database name.
+        string $name,
+        //
+        //An optional boolean that indicates whether we desire a database
+        //complete with its entities or not. The the default is complete.
+        // If not  complete an empty shell is returned; this may be useful when 
+        //quering the database directly, i.e., without the need of the object model
+        bool $complete = true,
+        //
+        //An option that when set to true, throws errors as soon as they are 
+        //found, or collects them into an errors variable. The default is 
+        //true. Set this to false, especially in in content of metavisuo when
+        //you want to report teh errors in teh browser.
+        bool $throw_exception = true
     ) {
         //
         //Construct the parent 
@@ -647,25 +831,26 @@ class database extends schema {
         //Attend to the 'complete' option. You are done if an incomplete database 
         //is required. Don't waste time on entities. This is important if all we
         //want is to run a query
-        if (!$complete) {
-            return;
-        }
+        if (!$complete) return;
         //
         //Activate the schema objects (e.g., entities, columns, etc) associated
         //with this database
-        $ok = $this->activate_schema();
-        //
-        //If there any errors, fix them before you carry on
-        if (!$ok) {
-            $this->report_errors();
-            return;
-        }
+        $this->activate_schema();
         //
         //Set the relational dependency for all the entities and log all the 
-        //cyclic conditions as errors.
+        //cyclic conditions as errors (at the database level).
         $this->set_entity_depths();
         //
+        //Compile and report errors encounterd in the database construction
         $this->report_errors();
+    }
+    
+    //Th children of a database, in the context of metavisuo, are entities
+    function children():array{
+        //
+        //
+        return $this->entities; 
+        
     }
     
     // 
@@ -791,35 +976,27 @@ class database extends schema {
         throw new \Exception("You cannot save a database");
     }
 
-    //The user may decide to report the errors in a different way than just 
-    //throwing an exception. For instance, if the database initialization was 
-    //started from javascript, the reported errors may be input to a better 
-    //reportng system than the dumbed output.
+    //Compile database loading errors and:-
+    //--save them to the error_report property for later use
+    //--if the user desires, throw an eception
     private function report_errors() {
         //
-        //Compile the error report.
+        //Compile the error report, returning a text and the total number of 
+        //errors found there in.
+        list ($report, $no_of_errors) = $this->compile_report();
         //
-        //start with an empty report and no_of_errors as 0
-        $no_of_errors = 0;
-        $report = "";
-        //
-        $this->get_error_report($no_of_errors, $report);
-        //
-        //Save the error report -- incase you want to access it
+        //Save the error report -- incase we wish to access it later, e.g.,
+        //from the Javascript side.
         $this->error_report = $report;
         //
-        //Depending on the throw_exception setting...
-        if ($this->throw_exception) {
-            //
-            if ($no_of_errors > 0) {
-                throw new \Exception($report);
-            }
-        }
+        //Throw an Exception, if the user so desires.
+        if ($this->throw_exception && $no_of_errors>0) throw new \Exception($report);
+        
     }
 
     //Activate the schema objects (e.g., entities, columns, etc) associated
     //with this database
-    private function activate_schema(): bool {
+    private function activate_schema():void{
         //
         //Query the information information scheme once for the following data
         //
@@ -838,56 +1015,7 @@ class database extends schema {
         //Check for Mutall model consistency, e.g., 
         //missing indices, missing primary keys, invalid data type for primary
         //keys, invalid relations
-        return $this->check_model_integrity();
-    }
-
-    //
-    //Check for mutall model consistency, e.g., 
-    //missing indices, missing primary keys, invalid data type for primary
-    //keys, invalid relations
-    private function check_model_integrity(): bool {
-        //
-        //collection of the errors
-        $errors = [];
-        //
-        //loop through all the entities to test the following 
-        foreach ($this->entities as $ename => $entity) {
-            //
-            //1. indices
-            if (!isset($entity->indices)) {
-                //
-                //Set an error message both at the database level and the entity 
-                $error = new \Error("Entity $ename is incomplete and lack indexes");
-                array_push($this->errors, $error);
-                //
-                //Ensure that the primary key is noy used for indexing.
-                // $this->x();
-            }
-            //
-            //2.missing primary keys
-            if (!isset($entity->columns[$entity->name])) {
-                //
-                //Set an error message both at the database level and the entity 
-                $error = new \Error("Entity $ename does not have the primary key");
-                array_push($this->errors, $error);
-            }
-            //
-            //Every column should have the proper credentials
-            foreach ($entity->columns as $col) {
-                //
-                //Check the integrity of this column, including comments
-                $col->verify_integrity();
-                
-                //
-                //Collect column errors if any
-                $errors += $col->errors;
-            }
-            //
-            $errors += $entity->errors;
-        }
-        //
-        //return true if the count og errors is greater than 0 else it is a false
-        return count($errors) === 0;
+        foreach ($this->entities as $entity) $entity->verify_integrity();
     }
 
     //Check if an sql is valid. It returns thh same sql.
@@ -983,7 +1111,7 @@ class database extends schema {
         $columns = $this->get_columns();
         //
         //Use the static data to formulate a capture column object
-        foreach ($columns as [$dbname, $ename, $cname, $data_type, $default, $is_nullable, $comment, $length, $key, $type]) {
+        foreach ($columns as [$dbname, $ename, $cname, $data_type, $default, $is_nullable, $comment, $length, $key, $type, $extra]) {
             //
             //The database names must match
             if ($dbname!==$this->name) 
@@ -1000,13 +1128,13 @@ class database extends schema {
                 //The column constrcutior variablles are desifgned to a) initialize
                 //its capture parent and b) check consistency with Mutall 
                 //framework
-                $column = new primary($entity, $cname, $data_type, $default, $is_nullable, $comment, $length, $type);
+                $column = new primary($entity, $cname, $data_type, $default, $is_nullable, $comment, $length, $type, $extra);
             }
             //
             //Create an ordinary column. It will be upgrated to a foreign key
             //at a later stage, if necessary.
             else {
-                $column = new attribute($entity, $cname, $data_type, $default, $is_nullable, $comment, $length, $type);
+                $column = new attribute($entity, $cname, $data_type, $default, $is_nullable, $comment, $length, $type, $extra);
             }
             //
             //Add fields derived from comments, i.e., offload the comment properties
@@ -1058,7 +1186,10 @@ class database extends schema {
                 //
                 //Add the column type, to access the enum data type (if any) 
                 //needed for supporting the selector i/o 
-                ."column_type as type "
+                ."column_type as type, "
+                //
+                //auto_increment|virtual generated|virtual stored
+                ."extra "
                 //
             . "from "
                 //
@@ -1100,7 +1231,7 @@ class database extends schema {
             //
             //Get the named entity from this database. 
             //
-            //The dbnames must match
+            //The dbnames must match (unless yor query was not accurate)
             if ($dbname!==$this->name)
                 throw new \Exception("This databae name $this->name does not match $dbname");
             //
@@ -1110,35 +1241,41 @@ class database extends schema {
             //Get the matching attribute; it must be set by this time.
             $attr = $entity->columns[$cname];
             //
-            //Ignore all the primary columns  in this process since only attributes 
+            //Ignore all the primary columns in this process since only attributes 
             //can be converted to foreigners
-            if ($attr instanceof primary) {
-                continue;
-            }
+            if ($attr instanceof primary) continue;
             //
-            //Compile the referenced (database and table names)
+            //Compile the referenced database, table and column names 
             $ref = new \stdClass();
             $ref->table_name = $ref_table_name;
             $ref->db_name = $ref_db_name;
             $ref->cname = $ref_cname;
             //
             //Create a foreign key colum using the same attribute name
-            $foreign = new foreign($entity, $cname, $attr->data_type,
-                    $attr->default, $attr->is_nullable, $attr->comment, $attr->length, $attr->type,
-                    $ref);
+            $foreign = new foreign(
+                $entity, 
+                $cname, 
+                $attr->data_type,
+                $attr->default, 
+                $attr->is_nullable, 
+                $attr->comment, 
+                $attr->length, 
+                $attr->type, 
+                $attr->extra,
+                $ref
+            );
             //
             //Offload the remaining options to the foreign key as local 
-            //properties. (Why is this necesary? Just in case there were 
-            //properties derived from comments)
+            //properties. Why is this necesary? Just in case there were 
+            //properties derived peviously, e.g., errors[]
             mutall::offload_properties($foreign, $attr);
             //
-            //Replace the attribute with the forein key
+            //Replace the previously derived attribute with the foreign key
             $entity->columns[$cname] = $foreign;
         }
     }
 
-    //Update some ordinary columns to foreign columns base on the key column 
-    //usage table
+    //Retrieve details about relationships, in terms of foreign key columns
     private function get_foreign_keys(): array/* [dbname, ename, cname, ref_table_name, ref_db_name][] */ {
         //
         //Set sql statement for selecting all foreign key columns of this table 
@@ -1178,8 +1315,8 @@ class database extends schema {
     }
 
     //Activate all the identification indices from the statistics of the 
-    //information schema. NB. This process does not affect a table that does 
-    //not have indices, so, we must initialize all indices when we create an table
+    //information schema. N.B. This process does not affect a table that does 
+    //not have indices, so, we must initialize all indices when we create a table
     function activate_indices() {
         //
         //Get all the index columns for all the indices for all the entities
@@ -1231,34 +1368,6 @@ class database extends schema {
         return $result->fetchAll();
     }
 
-    //Returns an error report and the number of errors it contains
-    private function get_error_report(int &$no_of_errors, string &$report): void {
-        //
-        //Start with an empty report
-        $report = "";
-
-        //Report errors at the database level
-        $count = count($this->errors);
-        //
-        //Compile the errors if necessary, at the database level.
-        if ($count > 0) {
-            //
-            $report .= "\n<h2><b><u>There are $count errors in table'$this->name'</u></b></h2>";
-            //
-            $report .= '<ol>';
-            foreach ($this->errors as $error) {
-                $report .= "\n <li> $error </li>";
-            }
-            $report .= '</ol>';
-        }
-        //
-        //Contintue compiling to include the entity-level errors
-        foreach ($this->entities as $entity) {
-            //
-            $entity->get_error_report($no_of_errors, $report);
-        }
-    }
-
     //Set the dependency depths for all the entities as weell as loggin any 
     //cyclic errors
     private function set_entity_depths(): void {
@@ -1268,11 +1377,11 @@ class database extends schema {
         }
     }
 
-    //Report errrors arising out of the activation process, rather than throw 
-    //than error as it occurs
+    //Report an error arising out of the activation process, rather than throw 
+    //it as it occurs
     private function report_activation_errors() {
         //
-        //Get teh numbe of errors
+        //Get the number of errors
         $count = count(self::$errors);
         //
         //There has to be at leason one error for the reporting to be done
@@ -1365,9 +1474,9 @@ class database extends schema {
     }
 
     //
-    //Returns a complete database structure, .i.e one that is populated with 
+    //Returns a complete database structure, .i.e, one that is populated with 
     //entities and columns
-    //We return an any because we do not wish to check the structure of our data  
+    //We return an any??? because we do not wish to check the structure of our data  
     function export_structure(): database {
         return $this;
     }
@@ -1464,11 +1573,7 @@ class database extends schema {
         //
         //Encode the database structure to a json string, throwing exception if
         //this is not possible
-        try {
-            $result = json_encode($this, JSON_THROW_ON_ERROR);
-        } catch (\Exception $ex) {
-            $result = mutall::get_error($ex);
-        }
+        $result = json_encode($this, JSON_THROW_ON_ERROR);
         //
         return $result;
     }
@@ -1501,9 +1606,6 @@ class database extends schema {
 //that it can be saved to a database.
 abstract class entity extends schema implements expression {
     //
-    //The entity name
-    public string $name;
-    //
     //The columns of this entity
     public array /*<column>*/$columns;
     //
@@ -1511,14 +1613,25 @@ abstract class entity extends schema implements expression {
     //constructed
     public array/*<cname>*/ $indices;
     //
+    //The alias name used for referncing an entity
+    public string $alias_name;
+    //
+    //The database name of  an entity
+    public string $dbname;
+
+    //Marks an entity as used for repoering purose or not
+    public bool $reporting;
+    
+    //
     function __construct(string $name) {
-        //
-        $this->name = $name;
         //
         parent::__construct($name);
     }
 
-    //The primary key column of any entity is teh column named the
+    //The children of an entity (from metavsuo point if view) are its columns
+    function children():array{return $this->columns; }
+
+    //The primary key column of any entity is the column named the
     //same as the view
     function pk():column{
         //
@@ -1532,7 +1645,7 @@ abstract class entity extends schema implements expression {
         //Return the column
         return $this->columns[$name];
     }
-    
+
     //Set the columns of this entity. It is illegal to try to access the columns 
     //before calling this method.
     public function set_columns(): void{
@@ -1549,32 +1662,6 @@ abstract class entity extends schema implements expression {
     //This is the string represention of this table 
     public function to_str(): string {
         return "`$this->dbname`.`$this->name`";
-    }
-
-    //Returns an error report and the number of errors it contains
-    function get_error_report(int &$no_of_errors, string &$report): void {
-        //
-        //        
-        $count = count($this->errors);
-        $no_of_errors += $count;
-        //
-        //Compile the errors if necessary, at the database level.
-        if ($count > 0) {
-            //
-            $report .= "\n<h2><b><u>There are $count errors in entity $this->partial_name</u></b></h2>";
-            //
-            $report .= '<ol>';
-            foreach ($this->errors as $error) {
-                $report .= "\n <li> $error </li>";
-            }
-            $report .= '</ol>';
-        }
-        //
-        //Report column errors
-        foreach ($this->columns as $column) {
-            //
-            $column->get_error_report($no_of_errors, $report);
-        }
     }
 
     //Returns the string version of this entity as an sql object for use in array
@@ -1680,30 +1767,11 @@ abstract class entity extends schema implements expression {
         }
     }
 
-    //returns true if the entity is used for  reporting 
-    function reporting() {
-        //
-        //Check if the purpose is set at the comment
-        if (isset($this->purpose)) {
-            //
-            //Return the repoting status
-            return $this->purpose == 'reporting';
-            //
-            //else return a false 
-        }
-        return false;
-    }
     
-
     //Yield all the parts of a friendly column. Each part is derived from 
     //an identifier attributes.Every entity has its own way of generating 
     //friendly columns
-    function get_friendly_part2(): \Generator {
-        //
-        //Use non-verbosity to construct the friendly name, if requested
-        if (!$this->is_verbose) return yield from $this->get_friendly_part_non_verbosely();
-        //
-        //Use verbosity to construct the parts of a friendly cokumn
+    function get_friendly_part(): \Generator {
         //
         //Loop through all the columns of this entity, yielding its 
         //friendly components
@@ -1731,31 +1799,6 @@ abstract class entity extends schema implements expression {
         }
     }
     
-    //Yield all the parts of a friendly column and avoid verbosity
-    function get_friendly_part_non_verbosely(): \Generator {
-        //
-        //Get the entity that is driving this propcess
-        $entity = $this->source;
-        //
-        //Use the first of the entitity's indices to drive the parts. Remember 
-        //that the indices is an indexed array
-        $index = array_values($entity->indices)[0];
-        //
-        //Loop through the columns of this index. An index is an array of column
-        //names
-        foreach($index as $cname){
-            //
-            //Get the column that matches this cname
-            $col = $entity->columns[$cname];
-            //
-            //Collect this column if it is an attribute
-            if ($col->is_id() && $col instanceof foreign) 
-                yield from $col->away()->get_friendly_part();
-            elseif ($col->is_id() && $col instanceof attribute)
-                yield $col;    
-        }
-    }    
-
     //Returns the mandatory columns of this entity as ids i.e those not nullable 
     //and those used as ids as a record to be saved 
     function get_id_columns(): array {
@@ -1782,46 +1825,6 @@ abstract class entity extends schema implements expression {
         return $ids;
     }
 
-    //
-    //Returns a true if the data provided for an update contains all the needed 
-    //identification record or an error message indicating the column name of
-    //the data that was not provided 
-    function is_data_valid()/* a true or error string is returned */ {
-        //
-        //Get the columns to be inserted 
-        $cnames = array_keys(record::$current->getArrayCopy());
-        //
-        //1. loop through the column of this entity to ensure that all the columns 
-        //which are not nullable are included in the cnames else return a error
-        //and those that are used as ids 
-        foreach ($this->columns as $column) {
-            //
-            //proceed with the loop if this column name is included 
-            if (in_array($column->name, $cnames)) {
-                continue;
-            }
-            //
-            //if the column is not nullable throw are exception is not found in 
-            //enames 
-            if ($column->is_nullable === 'NO') {
-                //
-                //return the message that this column has to be set 
-                return "New record was not saved because The $column->name is a "
-                        . "mandatory data and has to be provided for this data to be valid";
-            }
-        }
-        //
-        //2.0 loop through the cnames to ensure that all those columns exist 
-        foreach ($cnames as $cname) {
-            if (!array_key_exists($cname, $this->columns)) {
-                return "the column $cname does not exist please check your spellings";
-            }
-        }
-        //
-        //
-        return true;
-    }
-
     //Returns the source entity taking care 
     function get_source(): string {
         //
@@ -1831,7 +1834,7 @@ abstract class entity extends schema implements expression {
         return "$this->name";
     }
 
-    //returns a valid sql string from expression
+    //Returns a valid sql string from expression
     function fromexp(): string {
         //
         if (isset($this->alias_name)) {
@@ -1887,38 +1890,25 @@ abstract class entity extends schema implements expression {
         fwrite($stream, "\t}\n");
     }
     
+    //Generate code for overrideing abstract methods in the context of ORM
     private function get_overrides():string{
-        return 
-    "
-    //Collect all the layouts of this entity
-    collect_layouts(): Generator<quest.layout>;
-    //
-    //Convert a basic tuple structure to a ready one. The ready one is then used
-    //for setting the user properties of the tuple 
-    convert_reader_2_edit(i:reader<tuple>):edit<tuple>;
-    //
-    //Convert the ready data of this tuple to a  basic version primarily for the
-    //for purpose of saving it to a database. 
-    convert_2_writer():writer<tuple>;
-    
-    ";
+         
+        $overrides = "
+            //Collect all the layouts of this entity
+            collect_layouts(): Generator<quest.layout>;
+            //
+            //Convert a basic tuple structure to a ready one. The ready one is then used
+            //for setting the user properties of the tuple 
+            convert_reader_2_edit(i:reader<tuple>):edit<tuple>;
+            //
+            //Convert the ready data of this tuple to a  basic version primarily for the
+            //for purpose of saving it to a database. 
+            convert_2_writer():writer<tuple>;
+
+            ";
+       return $overrides;
     }
     
-    /*
-     //
-    //The database default value for this column 
-    public ?string $default;
-    //
-    //The acceptable datatype for this column e.g the text, number, autonumber etc 
-    public string $data_type;
-    //
-    //defined if this column is mandatory or not a string "YES" if not nullable 
-    // or a string "NO" if nullable
-    public string $is_nullable;
-    
-     */
-  
-
 }
 
 //
@@ -1931,9 +1921,6 @@ class table extends entity {
     //
     //To allow external access to this table's protected database
     function get_dbase(){return $this->dbase; }
-    //
-    //The database name associated with this table
-    public string $dbname;
     //
     //The relation depth of this entity.  
     public ?int $depth = null;
@@ -1957,6 +1944,47 @@ class table extends entity {
         //Set the database name for global access
         $this->dbname = $parent->name; 
     }
+    
+    //Verify the integrity of a database table (which we refer to as an entity
+    //in the Javascript context)
+    function verify_integrity():void{
+        //
+        //Verify integrity for all the columns, before those of the entity
+        foreach ($this->columns as $cname=>$col) {
+            //
+            //A general rule for columns: Use snake (not camel) case for columm names
+            if ($cname!==strtolower($cname)) $this->errors[]=new myerror("Use snake case for column named '$cname'");
+            //
+            //Apply column-specific intgrity checks
+            $col->verify_integrity();
+        }    
+        //
+        //Verify integrity for Indices
+        if (!isset($this->indices)) 
+            $this->errors[]= new myerror("Entity {$this->name} has no identification index");
+        //
+        //Ensure that the primary key is not used for building the identification.
+        $this->no_primary_key_in_index();
+        //
+        //An entity must have a primary key
+        if (count(array_filter($this->columns, fn($col)=>$col instanceof primary))===0)
+        $this->errors[] = new myerror("Entity {$this->name} does not have a primary key");
+        
+    }
+    //
+    //Ensure that the primary key is not used for building the identification index.
+    function no_primary_key_in_index(){
+        //
+        //Only cases where indices are defiend are consideerd
+        if (!isset($this->indices)) return;
+        //
+        //Primary key columns should not be use in identification indices
+        foreach($this->indices as $ixname=>$index) 
+        foreach ($index as $cname)
+        if ($this->columns[$cname] instanceof primary)
+        $this->errors[]  = new myerror("Primary key of '{$this->name}' cannot be used in identification index '$ixname'");
+        
+    } 
     
     //Yields an array of pointers as all the foreigners that reference this 
     //table. This function is similar to foreigners(), except that its output 
@@ -2134,6 +2162,11 @@ class view extends entity {
     //Other clauses of an sql that the user can provide after a view is created
     public array $group_by = [];
 
+    //Not quite sure what this property is. It is used in the execute() method 
+    public string $where_ex;
+    //
+    public string $order_by;
+
     //We dont expext to callt this constructor from Js, because the data types 
     //are not simple
     function __construct(
@@ -2179,12 +2212,15 @@ class view extends entity {
         return "`$this->dbname`.`$this->name`";
     }
 
-    //Yield the trivial entity in this view includes all the target entites involved 
-    //in this join
+    //Yielding the trivial entity in this view includes all the target entites 
+    //involved in this join
     function yield_entity(): \Generator {
-        foreach ($this->join->targets->keys() as $entity) {
-            yield $entity;
-        }
+        //
+        throw new \Exception("This method is not complete. The previous code is
+        commented out because targets are not define in the join");
+        yield;
+        //
+        //foreach ($this->join->targets->keys() as $entity) yield $entity;
     }
 
     //
@@ -2222,13 +2258,13 @@ class view extends entity {
                 //There already exists a where clause.
                 //
                 //Extend it.
-                $where_str = "$this->where AND $this->where_ex";
+                $where_str = "{$this->where} AND {$this->where_ex}";
             } else {
                 //
                 //There is no where clause in this view.
                 //
                 //Insert one.
-                $where_str = "WHERE $this->where_ex";
+                $where_str = "WHERE {$this->where_ex}";
             }
         } else {
             //
@@ -2242,7 +2278,7 @@ class view extends entity {
         }
         //
         //Compile the complete sql.
-        $sql = "{$this->stmt()} \n$where_str \n$this->order_by";
+        $sql = "{$this->stmt()} \n$where_str \n{$this->order_by}";
         //
         //Get the current database, guided by the database name of the from 
         //clause
@@ -2420,27 +2456,16 @@ class column extends schema implements expression{
         $this->ename = $parent->name;
     }
 
-    // //Returns an error report and the numbet\r of errors it contains
-    public function get_error_report(int &$no_of_errors, string &$report): void {
-        //        
-        $count = count($this->errors);
-        $no_of_errors += $count;
-        //
-        //Compile the errors if necessary, at the database level.
-        if ($count > 0) {
-            //
-            $report .= "\n<h2><b><u>There are $count errors in column $this->name</u></b></h2>";
-            //
-            $report .= '<ol>';
-            foreach ($this->errors as $error) {
-                $report .= "\n <li> $error </li>";
-            }
-            $report .= '</ol>';
-        }
-    }
     //
-    //Only an attribute column can yield itself; all other columns cannot
-    function yield_attribute(): \Generator {}
+    //Only an attribute column can yield itself; all other columns cannot.
+    //
+    //Netbeans accepts does not commplain when we leave out the yield keyword
+    //VS code does. Im not sure whether this yields a null or not. Needs to check
+    //
+    //Results from the research are:-
+    //A function is a generator if it contains the keyword 'yield'
+    //Returing before yielding generates nothing
+    function yield_attribute(): \Generator {return; yield; }
     
     //Yield the entity of this column
     function yield_entity(): \Generator {
@@ -2459,6 +2484,14 @@ class column extends schema implements expression{
     function to_str(): string {
         return "$this";
     }
+
+    //Verify the integrity of a database table (which we refer to as an entity
+    //in the Javascript context)
+    function verify_integrity():void{
+        //
+        //A general rule for columns: Use snake (not camel) case for names
+        if ($this->name!==strtolower($this->name)) $this->errors[]=new myerror("Use snake case for this column, '{$this->name}'");
+    }
     
 }
 //Modelling primary (as opposed to derived) columns needed for data capture and 
@@ -2471,29 +2504,29 @@ abstract class capture extends column {
     //
     //The construction details of the column includes the following;- 
     //
-    //Metadata container for this column is stored as a structure (i.e., it
-    //is not offloaded) since we require to access it in its original form
+    //Originally used for storing meta data in a strictred way. This usage has 
+    //been deplrecated in favor of extending the information schema with a submodel
+    //comprising of dbase-entuty-attribute tables. A comments type is string|null 
     public ?string $comment;
     //
-    //The database default value for this column 
+    //The default value for this column; its type is string|null 
     public ?string $default;
     //
-    //The acceptable datatype for this column e.g the text, number, autonumber etc 
+    //The acceptable datatype for this column, e.g., the text, number etc 
     public string $data_type;
     //
-    //defined if this column is mandatory or not a string "YES" if not nullable 
-    // or a string "NO" if nullable
+    //Shows if this column is mandatory or not. It is a string "YES" if not 
+    //nullable  or a string "NO" if nullable
     public string $is_nullable;
     //
-    //The size of the column
+    //The size of the column. Its type is number|null
     public ?int $length;
     //
     //The column type (needed for extraction enumerated of choices)
     public string  $type;
     //
-    //Every capture column should be checked for compliance to the Mutall 
-    //framework.
-    abstract function verify_integrity();
+    //Extra details attached to a column, e.g., auto_increment
+    public ?string $extra; /*'auto_increment'|'VIRTUAL_GENERATED'|'STORED GENERATED'|null*/
     //
     function __construct(
             table $parent,
@@ -2501,9 +2534,10 @@ abstract class capture extends column {
             string $data_type,
             ?string $default,
             string $is_nullable,
-            string $comment,
+            ?string $comment,
             ?int $length,
-            string $type
+            string $type, 
+            ?string $extra
     ) { 
        //
         //save the properties of the capture the default, datatype, is_nullable,
@@ -2514,6 +2548,7 @@ abstract class capture extends column {
         $this->is_nullable = $is_nullable;
         $this->length = $length;
         $this->type = $type;
+        $this->extra = $extra;
         //
         //Create the parent column that requires the dbname, the ename and the 
         //column name  
@@ -2523,7 +2558,7 @@ abstract class capture extends column {
         $this->dbname = $parent->dbname;
     }
     
-    //The string version of a capture column, iis the same as that of an
+    //The string version of a capture column, is the same as that of an
     //ordinary column, prefixed with the database name to take care of 
     //multi-database scenarios
     function __toString() {
@@ -2575,7 +2610,6 @@ abstract class capture extends column {
 //1. Is named the same as the entity where it is homed,
 //2. Has the autonumber datatype 
 class primary extends capture {
-
     //
     function __construct(
             entity $entity,
@@ -2583,38 +2617,36 @@ class primary extends capture {
             string $data_type,
             ?string $default,
             string $is_nullable,
-            string $comment,
+            ?string $comment,
             ?int $length,
-            string $type
+            string $type,
+            ?string $extra
     ) {
-        //
-        //To construct a column we only need the dbname, ename and the 
-        //column name 
-        parent::__construct($entity, $name, $data_type, $default, $is_nullable, $comment, $length, $type);
+        parent::__construct($entity, $name, $data_type, $default, $is_nullable, $comment, $length, $type, $extra);
     }
 
     //
     //The conditions of integrity of the primary key are:- 
     //1. It must be an autonumber 
     //2. It must be named the same way as the home entity 
-    //3. It must not be nullabe. [This is not important, so no need for testing 
-    //it] 
-    function verify_integrity() {
+    //3. It must be marked as the primary key
+    function verify_integrity():void {
         //
-        //1. It must be an autonumber 
-        if ($this->data_type !== 'int') {
-            //
-            $error = new \Error("The datatype, $this->data_type for primary key $this should be an int and an autonumber");
-            array_push($this->errors, $error);
-        }
+        //The primary key column must be an integer 
+        if ($this->data_type !== 'int') 
+            $this->errors[] = new myerror("The data type for the primary key, {$this->name}, should be a int, not {$this->data_type}");
         //
-        //2. It must be named the same way as the home entity. The names are case 
-        //sensitive, so 'Application' is different from 'application' -- the reason
-        //we empasise sticking to lower case rather than camel case
-        if ($this->name !== $this->entity->name) {
-            $error = new \Error("The primary key column $this should be named the same its home entity {$this->entity->name}");
-            array_push($this->errors, $error);
-        }
+        //The key must be  marked for auto increment
+        if ($this->extra!=='auto_increment')
+            $this->errors[] = new myerror("A primary key column shoulld be marked as for auto_increment");    
+        //
+        //A primary key column must be named the same way as the home entity. 
+        //This is useful for visualizing and specifying and joins between tables. The names are case 
+        //sensitive, so 'Application' is different from 'application' -- hence 
+        //the reason we empasise sticking to lower case rather than camel case
+        if ($this->name !== $this->entity->name) 
+            $this->errors[] = new myerror("The primary key column $this should be named the same its home entity {$this->entity->name}");
+            
     }
 
     //
@@ -2639,27 +2671,29 @@ class attribute extends capture implements expression {
             string $data_type,
             ?string $default,
             string $is_nullable,
-            string $comment,
+            ?string $comment,
             ?int $length,
-            string $type
+            string $type,
+            ?string $extra
     ) {
-        parent::__construct($entity, $name, $data_type, $default, $is_nullable, $comment, $length, $type);
+        parent::__construct($entity, $name, $data_type, $default, $is_nullable, $comment, $length, $type, $extra);
     }
 
-    
-
-    //Yield this attribute
+    //Yieldin an attribute yields itself
     function yield_attribute(): \Generator {
         yield $this;
     }
-    
-
-    //There are no special ntegrity checks associated with an attribute for 
-    //compiance to teh mutall framework
-    function verify_integrity() {
-        
-    }
+    //
+    //From metavisuo stand point, an attribute has no children
+    function children():array{return []; }
    
+    //There is nothing special about attributes (more than column names)
+    function verify_integrity():void{
+        //
+        //Chhose an attribute name that does not match that of an entity as
+        //this might confuse automated joints between tables. Such names are
+        //reserved for foreign keys
+    }
 }
 
 //
@@ -2757,7 +2791,7 @@ class link implements ilink{
 class foreign extends capture implements ilink{
     //
     //The name of the referenced table and database
-    public \stdClass /* {ref_table_name, ref_db_name} */ $ref;
+    public \stdClass /* {table_name, db_name, cname} */ $ref;
     //
     function __construct(
             entity $entity,
@@ -2765,37 +2799,30 @@ class foreign extends capture implements ilink{
             string $data_type,
             ?string $default ,
             string $is_nullable,
-            string $comment,
+            ?string $comment,
             ?int $length,
             string $type,
+            ?string $extra,
             \stdClass $ref
     ) {
         //
         //save the ref 
         $this->ref = $ref;
-        parent::__construct($entity, $name, $data_type, $default, $is_nullable, $comment, $length, $type);
+        parent::__construct($entity, $name, $data_type, $default, $is_nullable, $comment, $length, $type, $extra);
     }
 
-    //A foreign must have satisfy the following conditions to be compliant to the
-    //Mutall framework
-    //1. The datatype of the foreigner must be of int
-    //2. The referenced column name must be a primary key
-    function verify_integrity() {
+    //Only relationhips that link primary and foreig keys are considered
+    function verify_integrity():void {
         //
-        //1. It must of type int
-        if ($this->data_type !== 'int') {
-            //
-            $error = new \Error("The foreign key column $this of data type $this->data_type should be int");
-            array_push($this->errors, $error);
-        }
+        //The name of a foreign key should match that of the regeferenecd entity, 
+        //unless the relationship is hierarchical
+        if (!$this->is_hierarchical() && $this->ref->table_name!==$this->name)
+        $this->errors[]=new myerror("A foreign key column's name '{$this->name}' should match that of the referenced table '{$this->ref->table_name}'");
         //
-        //2. The referenced column name must be a primary key
-        //This is because the Mutall framework works with only many-to-one relationships
-        //Other types of relationships are not recognized
-        if ($this->ref->table_name !== $this->ref->cname) {
-            $error = new \Error("The foreign key column $this should reference a table {$this->ref->table_name} using the primary key");
-            array_push($this->errors, $error);
-        }
+        //Only foreign keys that point to a primary key are considered. This test
+        //is so designed that it will work even for an external database
+        if (!$this->is_hierarchical() && $this->ref->table_name !==$this->ref->cname)
+        $this->errors[]=new myerror("Only foreign keys that point to a primary key are considered");
     }
     
     //Implement the on clause for a many-to-one relationship. It has a form
@@ -2863,7 +2890,7 @@ class foreign extends capture implements ilink{
             $this->ref->table_name == $this->entity->name
             //
             //and in the same database    
-            && $this->ref->db_name == $this->entity->get_dbase()->name;
+            && $this->ref->db_name == $this->entity->dbname;
     }
     
 }
@@ -2882,7 +2909,8 @@ class pointer extends foreign {
             $col->is_nullable,
             $col->comment, 
             $col->length,
-            $col->type,    
+            $col->type,
+            $col->extra,    
             $col->ref
         );
     }
@@ -2912,62 +2940,75 @@ class pointer extends foreign {
 
 }
 
-//Expression for handling syntax and runtime errors in the code execution note that 
-//the error class does not have an sql string equivalent 
-//$msg is the error message that resulted to this error 
+//Expression for handling syntax and runtime errors in the code execution. N.B. 
+//The error class does not have an sql string equivalent 
+//$msg is the error message that resulted in this error 
 //$suplementary data is any additional information that gives more details about 
 //this error.
-//Error seems to be an existing class!!
+//Error seems to be an existing class in php, hence myerror!!
 //
-//My error can be participate as an output expression in schema::save()
-class myerror implements expression, answer{
+//My error can participate as an output expression in schema::save()
+//
+//myerror has been extended to handle custip errors. This is important for
+//when a database is exported to Javascript. The protetcted and private
+//properties of Error are not exprted. This version ensures that they are.
+class myerror extends \Error implements expression, answer{
+    //
+    //Unprotect the error message and the stack trace so that they can be 
+    //be exportable through json encoding.
+    public string $_message;
+    public string $_stack;
     //
     //Keeping track of the row counter for error reporting in a multi-row dataset
-    static /* row id */  ?int $row = null;
+    protected static /* row id */  ?int $row = null;
     
     //The supplementary data is used for further interogation of the error 
     //message. 
-    public $supplementatry_data;
+    protected  $supplementary_data;
     //
     //Requirements for supporting the get_position() method
-    public /*[row_index, col_index?]*/$position = null;
+    protected /*[row_index, col_index?]*/$position = null;
     //
-    //This functin is imporant for transferring expression ppostion data 
-    //between exprssions. E.g., 
+    //This functin is imporant for transferring expression postion data 
+    //between expressions, e.g., 
     //$col->ans->position = $col->exp->get_postion()
     function get_position(){return $this->position; }
-    
-    //
+        //
     //Construction requires a mandatory error message and some optional suplementary 
     //data that aids in debugging
     function __construct(string $msg, $supplementary_data = null) {
-        $this->msg = $msg;
+        //
+        //Initialize the parent class
+        parent::__construct($msg);
+        //
+        $this->_message = $msg;
         $this->supplementary_data = $supplementary_data;
+        //
+        //Unprotect the inherited stack trace, replacing yeh # with a line break
+        $this->_stack = str_replace('#', '<br/>', $this->getTraceAsString());
     }
 
     //The strimg representtaion of an error
     function __toString(): string {
-        return "Error. $this->msg";
+        return $this->message;
     }
 
     //
-    function to_str(): string {
-        return "Error. $this->msg";
-    }
+    function to_str(): string {return "Error. $this->message";}
 
     //An error is always an error.
-    function is_error() {return true;
-    }
+    function is_error() {return true;}
 
     //
     //There are no entities in an error, so this generator yields nothing. IM NOT
     //SURE HOW TO GET THE COMPILER NOT TO FLAG THIS CONSTRUCT (WITHOUT YIELD) AS
-    //AN ERROR  
-    function yield_entity():\Generator {}
+    //AN ERROR. Try the yield keyword with nothing...
+    //The correct answer is a return before a yield -- see StackOverflow;  
+    function yield_entity():\Generator {return; yield; }
 
     //
     //There are no attributes in  error, so this generator yields nothing 
-    function yield_attribute(): \Generator {}
+    function yield_attribute(): \Generator {return; yield; }
 
 }
 
@@ -3039,38 +3080,38 @@ class scalar implements expression, answer, operand {
 
     //There are no entoties in a literal expression
     function yield_entity(): \Generator {
-        
+        return; yield;
     }
 
     //There are no attributes in a literal 
     function yield_attribute(): \Generator {
-        
+        return; yield;
     }
 }
 
-//Modelling the null value. A null needed for supporting both the
-//capuire and reiorting f data. So, it is both an answer and an operand
+//Modelling the null value expression. A null is needed for supporting both 
+//caputuring and reporting f data. So, it is both an answer and an operand
 class null_ implements expression, answer, operand{
     //
     //Requirements for supporting the get_position() method
     public /*[row_index, col_index?]*/$position = null;
     //
-    //This functin is imporant for transferring expression ppostion data 
-    //between exprssions. E.g., 
+    //This functin is imporant for transferring expression position data 
+    //between expressions, e.g., 
     //$col->ans->position = $col->exp->get_postion()
     function get_position(){return $this->position; }
     //
     function __construct(){}
-    // 
     //
+    //The string version of a null, as required in an sql statement
     function to_str(): string {
         return "null";
     }
-    //There are no entoties in a literal expression
-    function yield_entity(): \Generator {}
+    //There are no entities in a literal null expression
+    function yield_entity(): \Generator {return; yield; }
 
-    //There are no attributes in a literal 
-    function yield_attribute(): \Generator {}
+    //There are no attributes in a null expression
+    function yield_attribute(): \Generator {return; yield; }
     // 
     //
     function __toString() {
@@ -3128,8 +3169,9 @@ class log extends \DOMDocument {
     //Output the xml document
     function close() {
         //
-        //Close the file handle
-        $this->save($this->filename);
+        //Close the file handle, assuming files specifications are with respect
+        //to the root directory
+        $this->save($_SERVER['DOCUMENT_ROOT'].$this->filename);
     }
 
     //Output the open tag for start of expression save
@@ -3239,7 +3281,7 @@ abstract class network extends schema {
     //performance). This ensures that networks that dont use pointers do not have
     //to carry the budden asociated with construcring poinsters
     public strategy $strategy;
-
+    
     //To create a network we must atleast know where the network will begin which 
     //is the source entity. The constructor cannot be called from javascript 
     //because of its complex data type. 
@@ -3306,12 +3348,6 @@ abstract class network extends schema {
         $this->verify_integrity($throw_exception);
     }
 
-    //By default all paths returned from exceuting a network have integrity. So,
-    //do noting.
-    function verify_integrity(bool $throw_exception = true) {
-        mutall::ignore($throw_exception);
-    }
-
     //Yields all the paths that start from the given entity. Each path is indexed
     //by a suitable name
     private function path_from_entity(entity $from, /* foreigner[] */ $path): \Generator {
@@ -3321,12 +3357,12 @@ abstract class network extends schema {
         if ($this->is_terminal($from)) {
             //
             //Yield teh indexed and the target name
-            yield $from->partial_name => $path;
+            yield $from->name => $path;
         }
         //
         //Us the foreigner returned by executing each of the serch functiion
         foreach ($this->strategy->search($from) as $foreigner) {
-            //var_dump($foreigner->partial_name);
+            //var_dump($foreigner->name);
             //
             //count the foreigners
             $this->considered++;
@@ -3361,7 +3397,7 @@ abstract class network extends schema {
         }
         //
         //b)...if 'there is evidence' that it is already in the path.
-        $repeated = array_filter($path, fn($f) => $f->partial_name == $foreigner->partial_name);
+        $repeated = array_filter($path, fn($f) => $f->name == $foreigner->name);
         //
         if (count($repeated) > 0) {
             return;
@@ -3389,10 +3425,12 @@ abstract class network extends schema {
 //pomiters, so thet dont have to beer the budden. The stargey class is desifned 
 //to dismiss pointers when they are not necessary
 abstract class strategy extends mutall {
-
     // 
     //Types of strategies for searching paths in a network are designed for  
     //boosting the search performance
+    public int $type;
+    //
+    //Possible values for the stragegy types are:-
     //
     //Use the foreign key columns only. Typically, the identifier network uses 
     //this strategy
@@ -3408,7 +3446,6 @@ abstract class strategy extends mutall {
     //
     //using only structural foreigners 
     const structural = 3;
-
     //
     function __construct(int $type = self::foreigners) {
         $this->type = $type;
@@ -3451,11 +3488,14 @@ class strategy_both extends strategy {
     }
 
     //
-    //Saerches in this strategy are bound to both the foreigners and the pointers 
+    //Searches in this strategy are bound to both the foreigners and the pointers 
     //since both constitute the path of a network in this strategy 
     function search(entity $source): \Generator {
+        //
         yield from $source->foreigners();
-        yield from $source->pointers();
+        //
+        //The source must be a table
+        if ($source instanceof table) yield from $source->pointers();
     }
 
 }
@@ -3473,17 +3513,15 @@ class strategy_structural extends strategy {
     }
 
     //
-    //Serches in this strategy are bound to both the foreigners and the pointers 
+    //Saerches in this strategy are bound to both the foreigners and the pointers 
     //since both constitute the path of a network in this strategy 
     function search(entity $source): \Generator {
         //
-        //Test if this entity is a reporting entity any to ensure that no path in yielded in 
-        //such a situation
-        if ($source->reporting()) {
-            
-        }
-        //
-        //entity not reporting yield both the pointers and the foreigners 
+        //Test if this entity is a reporting entity any to ensure that no path 
+        //is yielded in such a situation
+        if ($source->reporting)  return;
+        //    
+        //An entity not used for reporting yields both the pointers and the foreigners 
         else {
             yield from $source->structural_foreigners();
             yield from $source->structural_pointers();
@@ -3496,7 +3534,7 @@ class strategy_structural extends strategy {
 //to terminal condition 
 //Terminal condition is an entity that does not have structural foreign key(structural
 //means those entties that that are  not cross members)
-//parameter $source is the root orignin of this network see in network above 
+//parameter $source is the root origin of this network see in network above 
 class dependency extends network {
     //
     //

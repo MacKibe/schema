@@ -4,12 +4,10 @@ import * as schema from "../../../schema/v/code/schema.js";
 //
 //Added to allow access to a view
 import * as view from "../../../outlook/v/code/view.js";
-//Resolve the server functionality
-import * as server from "../../../schema/v/code/server.js";
 //
 //Why this method? Because the Theme class is becoming too large. The io class 
 //was conceived in an attempt to offload certain 'related' methods from Theme class  
-class io extends view.view {
+export class io extends view.view {
     anchor;
     col;
     // 
@@ -29,7 +27,7 @@ class io extends view.view {
     //One purpose for an io is to support CRUD services in a database.
     //But, an io without reference to a column, is also important. For instance
     //in the tree work. To support this duality, a column is optional (but
-    //required in foreign and primary ios
+    //required in foreign and primary ios)
     col) {
         //Initialize the parent view
         super();
@@ -135,8 +133,9 @@ class io extends view.view {
     //are created is the same as that of displaying them. You override
     //this method if you want to change the order. See the file_io example
     show() { }
-    //Create an io value using the optional io type. If the io type is not 
-    //given, deduce it from the database column's data type
+    //
+    //Create an io instance using the optional io type. If the io type is not 
+    //given, deduce it from the database column's data type.
     static create_io(
     // 
     //The parent of the input/output elements of this io. 
@@ -146,7 +145,7 @@ class io extends view.view {
     //deduce it from the column
     type, 
     // 
-    //The column associated with this io. 
+    //The column associated with this io, if availab,e. 
     col) {
         //
         //We must be able to defne the io type (or an actual io) from either
@@ -157,23 +156,25 @@ class io extends view.view {
         if (result instanceof io)
             return result;
         //
-        //Use the resulting io type to formulate the  io
+        //Use the resulting io type to formulate the  io instance
         switch (result) {
-            //For simple io types that use the standard inout tag...
+            //
+            //For simple io types that use the standard HTML input element...
             case 'date':
             case 'number':
             case 'email': return new input(result, anchor, col);
             //
             //For the more sophisticated io types....
             //
-            //A single checkbox used for represing a boolean io
+            //A single checkbox used for representing a boolean io
             case 'checkbox': return new checkbox(anchor, col);
             //
-            //Single or multiple choices implement as a set of radio or 
+            //Single or multiple choices implemented as a set of radio or 
             //checkbox inputs
             case 'checkboxes': return new choices(anchor, col, 'multiple');
             case 'radios': return new choices(anchor, col, 'single');
             //
+            //Inputs collected using a textaera element
             case 'textarea': return new textarea(anchor, col);
             //
             //Read only fields
@@ -341,7 +342,7 @@ class io extends view.view {
         const dbname = this.col.entity.dbase.name;
         //
         //Return the complete label
-        return [dbname, ename, alias, cname, exp];
+        return [exp, ename, cname, alias, dbname];
     }
     //Check if an io's value is valid or not. If not, report it as close as 
     //possible to its origin; otherwise add it to a report tag if any. If there 
@@ -414,7 +415,6 @@ class io extends view.view {
         return tag;
     }
 }
-export { io };
 // 
 //This io class models a single choice selector from an enumerated list that is
 //obtained from column type definition. 
@@ -763,8 +763,8 @@ export class input extends io {
     }
 }
 // 
-//This io is for capturing local/remote file paths and including images 
-class file extends input {
+//This io is for capturing local/remote file paths, including images 
+export class file extends input {
     type;
     //
     //The selector for the file source remote/local
@@ -778,14 +778,14 @@ class file extends input {
     //remotely
     explore;
     // 
-    //This is a header for labeling the input element and the explorer buttom 
+    //This is a header for labeling the input element and the explorer button 
     input_header;
     // 
     //Home button for the click listener to upload this file from the local to the 
     //remote server. 
     upload;
     //
-    //The tag for holding the image source if the type is an image.
+    //The tag for holding/previewing the image source if the type is an image.
     image;
     //
     //Default image sizes (in pixels) as they are being displayed on a crud page
@@ -794,7 +794,7 @@ class file extends input {
     // 
     constructor(anchor, 
     // 
-    //What does the file represent a name or an image
+    //What does the file represent, a name or an image?
     type, col) {
         // 
         //Ensure the input is of type=text 
@@ -838,7 +838,6 @@ class file extends input {
             className: "edit local",
             type: "button",
             value: "Upload",
-            onclick: async (evt) => await this.upload_file(evt)
         });
         //
         //The tag for holding the image source if the type is an image.
@@ -938,41 +937,6 @@ class file extends input {
         else
             rule.style.removeProperty("display");
     }
-    //
-    //This is a button`s onclick that sends the selected file to the server
-    //at the given folder destination, using the server.post method
-    async upload_file(evt) {
-        //
-        //Test if all inputs are available, i.e., the file and its server path
-        //
-        //Get the file to post from the edit window
-        //Get the only selected file
-        const file = this.file_selector.files[0];
-        //
-        //Ensure that the file is selected
-        if (file === undefined)
-            throw new schema.mutall_error('Please select a file');
-        //
-        //Get the sever folder
-        const folder = this.input.value;
-        //
-        //Post the file to the server
-        const { ok, result, html } = await server.post_file(file, folder);
-        //
-        //Flag the td inwhich the button is located as edited.
-        if (ok) {
-            // 
-            //Update the input tag 
-            //
-            //The full path of a local selection is the entered folder 
-            //plus the image/file name
-            this.input.value += "/" + file.name;
-        }
-        //
-        //Report any errors plus any buffered messages. 
-        else
-            throw new schema.mutall_error(html + result);
-    }
     // 
     //Overide the setting of the input value so as to extend the 
     //changing of the image source.
@@ -987,7 +951,6 @@ class file extends input {
         }
     }
 }
-export { file };
 //The text area class is an io extension of a simple input to allow
 //us to capture large amounts of text in an expandable box. 
 export class textarea extends input {
@@ -1058,7 +1021,7 @@ export class textarea extends input {
     }
 }
 //
-//The checkbox io is charecterised by 3 checkboxes. One for output, 2 for inputs
+//The checkbox io is charscterised by 3 checkboxes. One for output, 2 for inputs
 export class checkbox extends io {
     //
     //The output checkbox that is shown as disabled

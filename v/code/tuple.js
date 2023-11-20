@@ -152,7 +152,7 @@ export class tuple extends schema.entity {
         //
         //Use the layouts to write this entity the database on the server, using 
         //the (simpler) //normal method
-        const result = await server.exec(
+        const result /*the error*/ = await server.exec(
         //
         //Use the questionnaire class to write the data
         'questionnaire', 

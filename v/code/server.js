@@ -1,6 +1,6 @@
 //
 //Resolve the mutall error class, plus access to the application url
-import * as schema from "./schema.js";
+import { mutall_error, schema } from "./schema.js";
 //
 //Simplifies the windows equivalent fetch method with the following 
 //behaviour.
@@ -11,48 +11,65 @@ import * as schema from "./schema.js";
 export async function exec(
 //
 //The class of the php class to execute.
-class_name, 
+Class_name, 
 //
-cargs, 
+Cargs, 
 //
-method_name, 
+Method_name, 
 //
-margs) {
+Margs) {
     //
     //Call the non parametric form of exec
-    return await exec_nonparam(class_name, method_name, margs, cargs);
+    return await exec_nonparam(Class_name, Method_name, Margs, Cargs);
 }
 //
+//Upload the given file to the server at the given folder. The return value is 
+//either 'ok' or an error if the uploading failed for any reason 
+export async function upload_files(
 //
-//Post the given file to the server at the given folder.
-export async function post_file(file, path) {
+//The files to upload
+files, 
+//
+//The path where to upload
+destination, 
+//
+//What to do if the file already exist. The default is report
+action = 'report') {
     //
-    //1. Create a form data object
-    const formData = new FormData();
+    //Create a form for transferring data, i..e, content plus metadata, from 
+    //client to server
+    const form = new FormData();
     //
-    //2. Append the file to the form data object
+    // Add the files to the form
+    for (let i = 0; i < files.length; i++)
+        form.append("files[]", files[i]);
     //
-    //Attach the folder name where the file will go
-    formData.append('path', path);
+    //Add the other upload input arguments to the form. Include the fact that
+    //we are uplolading files (not executing PHP code)
+    form.append('inputs', JSON.stringify({ destination, action }));
     //
-    //Attach the actual file to the form data 
-    formData.append("file", file);
-    //     
-    //4. Prepare a fetch initialization file using the form data
-    const init = {
-        method: 'POST',
-        body: formData
-    };
+    //Indicate to index.php that we intened to upload file, rather than execute
+    //a php class method
+    form.append('upload_files', 'true');
     //
-    //5. Use the initialization object to send the file to the server
-    const response = await fetch('/schema/v/code/index.php?post_file=true', init);
+    //Use the form with a post method to get ready to fetch
+    const options = { method: "post", body: form };
     //
-    //await for the output which has the following structure
-    //{ok, result, html}
-    //ok
-    const output = await response.json();
+    //Transfer control to the php side
+    const response = await fetch('/schema/v/code/index.php', options);
     //
-    return output;
+    //Test if fetch was succesful or not; if not alert the user with an error
+    if (!response.ok)
+        throw "Fetch request failed for some (unknown) reason.";
+    //
+    //Get the text that was echoed by the php file
+    const result = await response.text();
+    //
+    //Alert the result in case of error
+    if (result === "ok")
+        return "ok";
+    else
+        return new Error(result);
 }
 //
 //The ifetch function is used for executing static methods on php class
@@ -73,7 +90,7 @@ margs) {
 }
 //
 //This is the non-parametric version of exec useful for calling both the static
-// and object of the given php class
+//and object version of the given php class
 export async function exec_nonparam(
 //
 //This is the name of the php class to create
@@ -93,7 +110,7 @@ cargs = null) {
     const formdata = new FormData();
     //
     //Add the application URL from the schema class
-    formdata.append("url", schema.schema.app_url);
+    formdata.append("url", schema.app_url);
     //
     //Add to the form, the class to create objects on the server
     formdata.append('class', class_name);
@@ -134,24 +151,22 @@ cargs = null) {
     //is an error message. htm is any buffered warnings.
     let output;
     //
-    //The json might fail (for some reason)
+    //The json might fail (for some reason, e.g., an Exception durinh PHP execution)
     try {
         //Try to convert the text into json
         output = JSON.parse(text);
     }
     //
-    //Invalid json;this must be a structural error that needs special attention
+    //Invalid json; ignore the json error. Report the text as it is. It may
+    //give clues to the error
     catch (ex) {
-        // 
-        //Compile a usefull error message
-        const msg = `Error trapping failed???. <br/> Message: "${ex.message}".<br/>Text = "${text}"`;
         //
-        throw new schema.mutall_error(msg);
+        throw new mutall_error(text);
     }
     //
     //The json is valid.
     // 
-    //Test if the requested method ran successfully 
+    //Test if the requested method ran successfully or not
     if (output.ok)
         return output.result;
     //
@@ -159,24 +174,6 @@ cargs = null) {
     //must be an error message string
     const msg = output.result;
     // 
-    //Report the error. 
-    throw new schema.mutall_error(msg);
-}
-//
-//Simplifies the windows equivalent fetch method with the following 
-//behaviour.
-//If the fetch was successful, we return the result; otherwise the fetch 
-//fails with an exception.
-//partcular static methods are specifed static:true....
-//It returns the same as result as the method  in php 
-export function test(
-//
-//The class of the php class to execute.
-class_name, 
-//
-method_name, 
-//
-method, 
-//
-margs) {
+    //Report the error and log teh result. 
+    throw new mutall_error(msg, output.result);
 }

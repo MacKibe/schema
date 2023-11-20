@@ -33,7 +33,7 @@ try{
     //Save the server postings to post.json for debugging 
     //purposes. Do this as early as we can, so that, at least we have a json for
     //debugging.
-    mutall::save_requests('post.json');
+    mutall::save_globals('post.json');
     //
     //The database quering system
     include_once  'sql.php';
@@ -58,8 +58,8 @@ try{
     //Run the requested method from a requested class
     $output->result = match(true){
         //
-        //Post a file to the server
-        isset($_GET["post_file"]) => \mutall\mutall::post_file(),
+        //Upload files to the server
+        isset($_POST["upload_files"]) => (new \mutall\mutall())->upload_files(),
         //
         //Execute a named method on a class        
         default => \mutall\mutall::fetch()
@@ -75,13 +75,21 @@ catch(\Exception $ex){
     //Register the failure fact.
     $output->ok=false;
     //
-    //Compile the full message, including the trace
-     //
-    //Replace the hash with a line break in the terace message
-    $trace = \str_replace("#", "<br/>", $ex->getTraceAsString());
-    //
     //Record the error message in a friendly way
-    $output->result = $ex->getMessage() . "<br/>$trace";
+    //
+    //Replace the hash with a line break in the trace message
+    $trace = str_replace("#", "<br/>", $ex->getTraceAsString());
+    //
+    //Compile the result following the above fragment
+    $result ="
+        <details>
+            <summary>
+                {$ex->getMessage()}
+            </summary>
+                $trace
+        </details>";
+    //
+    $output->result = $result;
 }
 finally{
     //

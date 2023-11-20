@@ -71,7 +71,7 @@ export type io_type =
     |'image' 
     
 //An io needs to be anchored somewhere, so that we can access its DOM element as
-//weel as its view
+//well as its view
 export interface anchor {
     //
     //The html element that is the parent of all the elements that make
@@ -110,7 +110,7 @@ export abstract class io extends view.view{
         //One purpose for an io is to support CRUD services in a database.
         //But, an io without reference to a column, is also important. For instance
         //in the tree work. To support this duality, a column is optional (but
-        //required in foreign and primary ios
+        //required in foreign and primary ios)
         public col?: schema.column
     ) {
         //Initialize the parent view
@@ -226,9 +226,9 @@ export abstract class io extends view.view{
     //are created is the same as that of displaying them. You override
     //this method if you want to change the order. See the file_io example
     show(): void {}
-    
-    //Create an io value using the optional io type. If the io type is not 
-    //given, deduce it from the database column's data type
+    //
+    //Create an io instance using the optional io type. If the io type is not 
+    //given, deduce it from the database column's data type.
     static create_io(
         // 
         //The parent of the input/output elements of this io. 
@@ -238,7 +238,7 @@ export abstract class io extends view.view{
         //deduce it from the column
         type?:io_type,
         // 
-        //The column associated with this io. 
+        //The column associated with this io, if availab,e. 
         col?: schema.column
     ): io{
         //
@@ -249,23 +249,25 @@ export abstract class io extends view.view{
         //If the result is an io, return it
         if (result instanceof io) return result;
         //
-        //Use the resulting io type to formulate the  io
+        //Use the resulting io type to formulate the  io instance
         switch(result){
-            //For simple io types that use the standard inout tag...
+            //
+            //For simple io types that use the standard HTML input element...
             case 'date':
             case 'number':
             case 'email':return new input(result, anchor, col);
             //
             //For the more sophisticated io types....
             //
-            //A single checkbox used for represing a boolean io
+            //A single checkbox used for representing a boolean io
             case 'checkbox': return new checkbox(anchor, col);
             //
-            //Single or multiple choices implement as a set of radio or 
+            //Single or multiple choices implemented as a set of radio or 
             //checkbox inputs
             case 'checkboxes': return new choices(anchor, col, 'multiple');
             case 'radios': return new choices(anchor, col, 'single');
             //
+            //Inputs collected using a textaera element
             case 'textarea': return new textarea(anchor, col);
             //
             //Read only fields
@@ -435,7 +437,7 @@ export abstract class io extends view.view{
         const dbname = this.col.entity.dbase.name;
         //
         //Return the complete label
-        return [dbname, ename, alias, cname, exp];
+        return [exp, ename, cname, alias, dbname];
     }
     
     //Check if an io's value is valid or not. If not, report it as close as 
@@ -871,7 +873,7 @@ export class input extends io{
 }
 
 // 
-//This io is for capturing local/remote file paths and including images 
+//This io is for capturing local/remote file paths, including images 
 export class file extends input{
     //
     //The selector for the file source remote/local
@@ -885,25 +887,24 @@ export class file extends input{
     //remotely
     public explore: HTMLInputElement;
     // 
-    //This is a header for labeling the input element and the explorer buttom 
+    //This is a header for labeling the input element and the explorer button 
     public input_header?: HTMLSpanElement;
     // 
     //Home button for the click listener to upload this file from the local to the 
     //remote server. 
     public upload: HTMLInputElement;
     //
-    //The tag for holding the image source if the type is an image.
+    //The tag for holding/previewing the image source if the type is an image.
     public image?: HTMLImageElement;
     //
     //Default image sizes (in pixels) as they are being displayed on a crud page
     static default_height = 75;
     static default_width = 75;
-    
     // 
     constructor(
         anchor: anchor,
         // 
-        //What does the file represent a name or an image
+        //What does the file represent, a name or an image?
         public type: "file"|"image",
         col?:schema.column
     ) {
@@ -949,7 +950,6 @@ export class file extends input{
             className:"edit local",
             type:"button",
             value:"Upload",
-            onclick:async (evt) => await this.upload_file(evt)
         });
         //
         //The tag for holding the image source if the type is an image.
@@ -1049,39 +1049,7 @@ export class file extends input{
         else rule.style.removeProperty("display");
     }
     
-     //
-    //This is a button`s onclick that sends the selected file to the server
-    //at the given folder destination, using the server.post method
-    public async upload_file(evt:Event) {
-        //
-        //Test if all inputs are available, i.e., the file and its server path
-        //
-        //Get the file to post from the edit window
-        //Get the only selected file
-        const file = this.file_selector.files![0];
-        //
-        //Ensure that the file is selected
-        if (file === undefined) throw new schema.mutall_error('Please select a file');
-        //
-        //Get the sever folder
-         const folder = this.input.value;
-        //
-        //Post the file to the server
-        const {ok, result, html} = await server.post_file(file, folder);
-        //
-        //Flag the td inwhich the button is located as edited.
-        if (ok) {
-            // 
-            //Update the input tag 
-            //
-            //The full path of a local selection is the entered folder 
-            //plus the image/file name
-            this.input.value += "/" + file.name;
-        }
-        //
-        //Report any errors plus any buffered messages. 
-        else throw new schema.mutall_error(html+result);
-    }
+    
     // 
     //Overide the setting of the input value so as to extend the 
     //changing of the image source.
@@ -1168,7 +1136,7 @@ export class textarea extends input{
     //
 }
 //
-//The checkbox io is charecterised by 3 checkboxes. One for output, 2 for inputs
+//The checkbox io is charscterised by 3 checkboxes. One for output, 2 for inputs
 export class checkbox extends io{
     //
     //The output checkbox that is shown as disabled

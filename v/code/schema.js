@@ -1,3 +1,8 @@
+//Mechamism for schema to access the mutall library 
+import { view, mutall_error } from "./../../../outlook/v/code/view.js";
+//
+//Re-export mutall error (for backward compatibility)
+export { mutall_error };
 //
 //The name-indexed databases accessible through this schema. This typically
 //comprises of the mutall_users database and any other database opened by
@@ -5,18 +10,14 @@
 export const databases = {};
 //
 //Modelling special mutall objects that are associated with a database schema.
-//Database, entity, index and column extends this class. Its main characterstic
+//Database, entity, index and column extend this class. Its main characterstic
 //is that it has an orgainzed error handling mechanism.
-export class schema {
+export class schema extends view {
+    parent;
     //
-    //The partial name is the unique identifier of this schema object; it aids in 
-    //xml logging and also in saving of this schema in an array since this name  
-    //is mostly used as an index
-    partial_name;
-    //
-    //Error logging is one of the major features of this schema with its ability 
-    //to bash?? its own error which affects the display of this schema (im metavisuo)
-    errors;
+    //Error logging is the main feature of this schema version. The propety is
+    //designed to support targeted error reportng, e.g., in the metavisuo application.
+    errors = [];
     //
     //Define a globally accessible application url for supporting the working of
     //PHP class autoloaders.
@@ -26,120 +27,64 @@ export class schema {
     //
     //To create a schema we require a unique identification also called a partial 
     //name described above. The default is no name
-    constructor(partial_name = 'unnamed') {
+    constructor(parent) {
         //
-        //The unique identification of this schema 
-        this.partial_name = partial_name;
+        super();
+        this.parent = parent;
         //
-        //A collection of the errors saved inform of an array for further buffered for 
-        //latter reporting. note these are the mojor causes for a schema object to be 
-        //represented using a red color 
-        this.errors = [];
+        //Concert
     }
     //
-    //Displays the error in this schema object in a div element that can be appended 
-    //as a node where required. Is this for metavisio support? 
-    display_errors() {
+    //A private svg element that is used to support the svg getter
+    __svg;
+    //The svg canvas that is used for creating elements is derived from the
+    //highest metavisuo object, typically, a database. In a future more advanced
+    //version, the server (as a container of databases) could be regarder as tge
+    //home of the svg element
+    get svg() {
         //
-        //create a div where to append the errors with an id of errors 
-        const div = document.createElement('div');
-        div.setAttribute("id", "errors");
+        //Return the private svg element if it is defined database level
+        if (this.__svg)
+            return this.__svg;
         //
-        //add the title of this error reportin as this partial name has count no
-        // of error
-        const title = document.createElement('h2');
-        title.textContent = `<u><b>This shema ${this.partial_name} has ${this.errors.length} not compliant 
-                           with the mutall framework </u></b>`;
-        div.appendChild(title);
+        //Its an error if we are at the highest in the metavisuo hierarchy
+        if (!this.parent)
+            throw new mutall_error('No svg element is found in the schema hierarchy');
         //
-        //loop through each of the errors appending their text content to the div 
-        this.errors.forEach(function (error) {
-            //
-            const msg = document.createElement("label");
-            msg.textContent = error.message;
-            div.appendChild(msg);
-        });
-        //
-        return div;
+        //Get the svg of the parent
+        return this.parent.svg;
     }
-    //
-    //Activates static error objects retrieved from php to js errors for further 
-    //altering of the display in this this schema 
-    activate_errors(static_errors) {
-        //
-        for (const err in static_errors) {
-            const erro = new Error(err);
-            //
-            //offload any additional information eg the additional information
-            Object.assign(erro, err);
-            //
-            //Add these errors to the error collection 
-            this.errors.push(erro);
-        }
-    }
-}
-//
-//This class extends the normal Javascript error object by 
-//alerting the user before logging the same to the console.
-export class mutall_error extends Error {
-    //
-    //Every error has an error message. The extra information is optional. If
-    //present, it is displayed in the console log, and the user is alerted to this
-    //effect. Typically, the extra is a a complex object, where we can use the 
-    //console log to inspect it.
-    constructor(msg, extra) {
-        //
-        //Create the parent error object
-        super(msg);
-        //
-        //If the extra is available, console log it
-        if (extra !== undefined)
-            console.log(extra);
-        //
-        //Compile the console invitation
-        const invitation = extra === undefined ? "" : 'See the console.log for further details';
-        //
-        //Alert the user with the error message, expanded with console invitation 
-        alert(`${msg}\n${invitation}`);
-    }
+    //Setting the private svg
+    set svg(s) { this.__svg = s; }
 }
 //Is a mutall object that models a database class. Its key feature is the 
 //collection of entities.
-class database extends schema {
+export class database extends schema {
     static_dbase;
     //
-    //A collection of entites for this database modeled intoa map because with 
-    //an object it was difficult to test its data type 
+    //A collection of entities/tables for this database indexed by their names
     entities;
-    //
-    //Databases are identified with the column name hence should be a unique string name
-    //you may notice it is similar with the schema partial name but it homed here 
-    //and its childern need it hence worth repeating 
-    name;
     //
     //Construct the database from the given static database structure imported
     //from PHP
     constructor(
     //
     //The static dbase that is used to create this database it is derived from php
-    //i.e the encoded version of the php database 
+    //i.e/,  the encoded version of the php database 
     static_dbase) {
         //
-        //Initialize the parent so that we can access 'this' object
-        super(static_dbase.name);
+        //For his version, a database has no parent. In the next version, the
+        //parent of a database will be a server
+        super();
         this.static_dbase = static_dbase;
         //
-        //Offload all the properties in the static structure o this new database
+        //Offload all the properties in the static structure of this new database
+        //You may need to re-declare the important properties so that typescript 
+        //can see them
         Object.assign(this, static_dbase);
         //
         //Activate the entities so as to initialize the map 
         this.entities = this.activate_entities();
-        //
-        //activate any errors if any 
-        this.activate_errors(static_dbase.errors);
-        //
-        //initialize the name of the database 
-        this.name = static_dbase.name;
         //
         //Register the database to global collection of databases
         databases[this.name] = this;
@@ -242,7 +187,7 @@ class database extends schema {
     }
 }
 //An entity is a mutall object that models the table of a relational database
-class entity extends schema {
+export class entity extends schema {
     dbase;
     //
     //Every entity has a collection of column inmplemented as maps to ensure type integrity
@@ -268,16 +213,6 @@ class entity extends schema {
     //datbaase.entities is not guranteed to follow dependency). Hense the 
     //use of a getter
     ids_;
-    //
-    //static object of the indices that are used to activate the ids. NB. PHP 
-    //indexed arraya are converted to javascript objects.
-    indices;
-    //
-    //the depth of this entity as derived from php
-    depth;
-    //
-    //The goup tag that holds the html of this entity including the attributes 
-    group;
     //A reference to the user database (that is shared by all databases in this 
     //server)
     static user = { dbname: 'mutall_users', ename: 'user' };
@@ -300,33 +235,22 @@ class entity extends schema {
     //The name of the entity
     name) {
         //Initialize the parent so thate we can access 'this' object
-        super(`${dbase.name}.${name}`);
+        super(dbase);
         this.dbase = dbase;
         //
         //
-        //The static structure from which this entity is formulated. it is mostly derived 
-        //from php. It is of type any since it is a object
-        const static_entity = this.static_entity = dbase.static_dbase.entities[name];
-        //
         //unique name of this entity 
         this.name = name;
+        //
+        //The static structure from which this entity is formulated. It is derived 
+        //from php. It is of type any since it is a object
+        const static_entity = this.static_entity = dbase.static_dbase.entities[name];
         //
         //Offload the properties of the static structure (including the name)
         Object.assign(this, static_entity);
         //
         //Use the static data to derive javascript column objects as a map 
         this.columns = this.activate_columns();
-        //
-        this.depth = static_entity.depth;
-        //
-        //activate any imported errors
-        this.activate_errors(static_entity.errors);
-        //
-        //initialize the indices 
-        this.indices = static_entity.indices;
-        //
-        //initialize the sqv group element for presentation purpses
-        this.group = document.createElement('g');
     }
     //Activate the columns of this entity where the filds are treated just like 
     //attributes for display
@@ -527,13 +451,11 @@ class entity extends schema {
     }
 }
 //Modelling the column of a table. This is an absract class. 
-class column extends schema {
+export class column extends schema {
+    entity;
     //
     //Every column if identified by a string name
     name;
-    //
-    //Every column has a parent entity 
-    entity;
     //
     //The static php structure used to construct this column
     static_column;
@@ -544,9 +466,6 @@ class column extends schema {
     //This is the descriptive name of this column 
     //derived from the comment 
     title;
-    //
-    //Html used to display this column in a label format
-    view;
     //
     //The construction details of the column includes the following
     //That are derived from the information schema  and assigned 
@@ -578,10 +497,6 @@ class column extends schema {
     // 
     //This property is assigned for read only columns 
     read_only;
-    // 
-    //A comment for tagging columns that are urls.
-    url;
-    //
     //These are the multiple choice options as an array of key value 
     //pairs. 
     select;
@@ -591,24 +506,21 @@ class column extends schema {
     //
     //The class constructor that has entity parent and the json data input 
     //needed for defining it. Typically this will have come from a server.
-    constructor(parent, static_column) {
+    constructor(entity, static_column) {
         //
         //Initialize the parent so that we can access 'this' object
-        super(`${parent.dbase.name}.${parent.name}.${static_column.name}`);
+        super(entity);
+        this.entity = entity;
         //
         //Offload the stataic column properties to this column
         Object.assign(this, static_column);
         //
-        this.entity = parent;
         this.static_column = static_column;
         this.name = static_column.name;
         //
         //Primary kys are speial; we neeed to identify thm. By default a column
         //is not a primary key
         this.is_primary = false;
-        //
-        //Html used to display this column in a label format
-        this.view = document.createElement('label');
     }
     //Returns true if this column is used by any identification index; 
     //otherwise it returns false. Identification columns are part of what is
@@ -648,7 +560,7 @@ class column extends schema {
     }
 }
 //Modelling the non user-inputable primary key field
-class primary extends column {
+export class primary extends column {
     //
     //The class contructor must contain the name, the parent entity and the
     // data (json) input 
@@ -677,7 +589,7 @@ class primary extends column {
     }
 }
 //Modellig foreign key field as an inputabble column.
-class foreign extends column {
+export class foreign extends column {
     //
     //The reference that shows the relation data of the foreign key. It comprises
     //of the referenced database and table names
@@ -764,14 +676,14 @@ class foreign extends column {
     }
 }
 //Its instance contains all (inputable) the columns of type attribute 
-class attribute extends column {
+export class attribute extends column {
     //
     //The column must have a name, a parent column and the data the json
     // data input 
-    constructor(parent, data) {
+    constructor(parent, static_column) {
         //
         //The parent constructor
-        super(parent, data);
+        super(parent, static_column);
     }
     //
     //popilates the td required for creation of data as a button with an event listener 
@@ -790,5 +702,3 @@ class attribute extends column {
     }
 }
 //
-//
-export { database, entity, column, attribute, primary, foreign };

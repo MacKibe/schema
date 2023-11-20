@@ -94,6 +94,8 @@ class questionnaire extends schema {
        }
     where:-
         label = [\capture\expression, ename, cname,  alias?, dbname?] 
+    
+    Assume the log and error files are specified relative to the root     
     */  
     function load(array $layouts, string $logfile="log.xml", string $error_file="errors.html")/*:questionnaire.Imala*/ {
         //
@@ -104,7 +106,7 @@ class questionnaire extends schema {
         //
         //Open the text file stream for logging table-dependent errors
         $this->error_file = $error_file;
-        $this->error_stream = fopen($error_file, "w");
+        $this->error_stream = fopen($_SERVER['DOCUMENT_ROOT'].$this->error_file, "w");
         //
         //Compile the inputs (used to create this questionnaire) to produce 
         //active milk (rather than static) tables and artefacts
@@ -198,7 +200,7 @@ class questionnaire extends schema {
         //
         //Log the runtime errors in this text file    
         string $error_file="errors.html"
-    ):string /*Ok|html_report*/{
+    ):string /*'ok'|html_report*/{
         //
         //Do the basic load
         $Imala = $this->load($layouts, $logfile, $error_file);
@@ -330,7 +332,7 @@ class questionnaire extends schema {
             throw new \Exception("Syntax or runtime errors expected");
         //
         //Output table-independent errors -- if any
-        $msg = $this->summarise_labels("Table-independent artefacts", $result['labels']);
+        $msg = $this->summarise_labels("Label Layout Errors", $result['labels']);
         //
         //Output table dependent errors
         //
@@ -340,7 +342,7 @@ class questionnaire extends schema {
             fn($table)=>$table['answer'] instanceof myerror);
         //
         //Start reporting of table-dependent errors -- if necessary
-        if (count($tables)) $msg.= "Table-dependent artefacts<br/>";
+        if (count($tables)) $msg.= "Table Layout Errors<br/>";
         //
         //Loop over all the erroneous tables to output the errors
         foreach($tables as $table){
@@ -357,13 +359,13 @@ class questionnaire extends schema {
                $msg.="There are "
                 .$table['body_errors']
                 ." table body errors<br/>"
-                ."<a href='".$this->error_file."'"
+                .'<a href="http://localhost'.$this->error_file.'"'
                 .">Open this link to see them</a>";
             } 
         }
         //
         //Return the error message
-        return $msg==""?"Ok":$msg;
+        return $msg==""?"ok":$msg;
     }
 
     //Summarise the given labels. A label destructures to:-
@@ -375,30 +377,17 @@ class questionnaire extends schema {
             $labels, 
             fn($label)=>$label[4] instanceof myerror);
         //
-        //Start with a empty error message
-        $msg = "";
+        //Return an empty string of thera are n errors
+        if (count($flabels)===0) return "";    
         //
-        //Compile the report message if necessary
-        if (count($flabels)>0){
-            //
-            //Compile message
-            $msg = "$header<br/>"
-                .implode("<br/>",
-                    array_map(
-                        function($label){
-                            //
-                            //Destructure the label
-                            list($dbname, $ename, $alias, $cname, $ans) = $label;
-                            //
-                            //Compile the message, formated as, e.g., 
-                            //chama.member["1"].name: Data truncated
-                            return "$dbname.$ename". json_encode($alias)
-                                .".$cname: $ans<br/>";
-                         }, 
-                        $flabels
-                    )     
-                );
-        }
+        //Otherwise, compile the report message
+        //
+        //Convert the labels to an array of strings
+        $strs = array_map(fn($label)=>json_encode($label), $flabels);
+        //
+        //Compile message, starting with the title, followed by teh joint 
+        //labels
+        $msg = "$header<br/>" .\join("<br/>",$strs);
         //
         return $msg;
     }
@@ -660,7 +649,7 @@ class questionnaire extends schema {
             //
             //Get the table's class name; it must exist
             if (!isset($Itable->class_name)) {
-                $errors[] = new myerror("Class name not found for table " . json_decode($Itable));
+                $errors[] = new myerror("Class name not found for table " . json_encode($Itable));
                 //
                 return;
             }
@@ -1252,11 +1241,11 @@ namespace mutall\capture;
         //that our OO model comprising of a database-entity-column-artefact needs
         //revision. For instance, capture/artefact does not extend a /table as 
         //one would expect. Instead, capture/artefact has a /table source. 
-        //Likewise, capture/column doe not extend /column; the latter is a 
+        //Likewise, capture/column does not extend /column; the latter is a 
         //source in the former.
         function write(/* row|null */$row): ans {
             //
-            //Do the write, according to the source column.
+            //Do the writing, according to the source column.
             $exp = match(true){
                 //
                 //Write an attribute involves simplifying its input/capture 
@@ -1300,10 +1289,17 @@ namespace mutall\capture;
             //Ensure that the attribute's size for identifiers
             //is less or equal to the size of the column. 
             if (
-                    isset($this->exp) && $this->exp instanceof scalar && $this->source->data_type === "varchar" && $this->source->is_id() && ($size = strlen(strval($this->exp->simplify()))) > $this->source->length
-            ) {
-                $exp = new \mutall\myerror("The size of column " . $this->source->full_name()
-                        . "is $size which is larger than " . $this->source->length);
+                isset($this->exp) 
+                && $this->exp instanceof scalar 
+                && $this->source->data_type === "varchar" 
+                && $this->source->is_id() //????
+                && ($size = strlen(strval($this->exp->simplify()))) > $this->source->length
+            ){
+                $exp = new \mutall\myerror(
+                    "The size of column " 
+                    . $this->source->full_name()
+                    . "is $size which is larger than " 
+                    . $this->source->length);
             }
             //
             //If the expression is set, simplify it
@@ -1312,11 +1308,16 @@ namespace mutall\capture;
             }
             //
             //The attribute's value not set; try the default.
-            elseif ($this->source->default !== 'NULL' & !is_null($this->source->default)) {
+            elseif(
+                $this->source->default !== 'NULL' 
+                && !is_null($this->source->default)
+            ) {
                 //
                 //Parse the default value to get an expression.
                 $exp = $this->parse_default($this->source->default);
-            } else {
+            }else {
+                //
+                //The attribute value is missing
                 //
                 //Get this column's entity name
                 $ename = $this->entity->name;
@@ -2026,8 +2027,8 @@ namespace mutall\capture;
             parent::__construct($tname, $body_start);
         }
 
-        //Openig a query does nothomg as most operations have alleady
-        //been done at in teh colstructor
+        //Openig a query does nothing as most operations have already
+        //been done  in the constructor. Sp, why is it important?
         function open(): void {
             //
             //Formulate the full database name string, as required by MySql. Yes, this
@@ -2036,7 +2037,7 @@ namespace mutall\capture;
             //
             //Initialize the PDO property. The server login credentials are maintained
             //in a config file.
-            $this->pdo = new \PDO($dbname, \config::username, \config::password);
+            $this->pdo = new \PDO($dbname, \mutall\config::username, \mutall\config::password);
             //
             //Throw exceptions on database errors, rather thn returning
             //false on querying the dabase -- which can be tedious to handle for the 
@@ -2546,8 +2547,8 @@ class scandisk extends table{
         function simplify():ans{
             //
             //Convert the value to a string, trim it, then test for zero length
-            //If true, return a null; oterwise self
-            return trim(strval($this->value))==='' ? \mutall\null_(): $this;
+            //If true, return a null; otherwise self
+            return trim(strval($this->value))==='' ? new \mutall\null_(): $this;
         }
        
     }

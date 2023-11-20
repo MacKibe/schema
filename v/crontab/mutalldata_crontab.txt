@@ -1,0 +1,1 @@
+00 18 * * * /home/mutall/projects/schema/v/command/carpark_update.php carpark_report >> /home/mutall/projects/schema/v/error/log.txt 
